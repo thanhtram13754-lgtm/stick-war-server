@@ -1,0 +1,39 @@
+0 verbose cli /data/data/com.termux/files/usr/bin/node /data/data/com.termux/files/usr/bin/npm
+1 info using npm@11.17.0
+2 info using node@v26.3.1
+3 silly config load:file:/data/data/com.termux/files/usr/lib/node_modules/npm/npmrc
+4 silly config load:file:/data/data/com.termux/files/home/.npmrc
+5 silly config load:file:/data/data/com.termux/files/home/.npm-global/etc/npmrc
+6 verbose title npm start
+7 verbose argv "start"
+8 verbose logfile logs-max:10 dir:/data/data/com.termux/files/home/.npm/_logs/2026-07-04T10_51_00_320Z-
+9 verbose logfile /data/data/com.termux/files/home/.npm/_logs/2026-07-04T10_51_00_320Z-debug-0.log
+10 silly logfile start cleaning logs, removing 1 files
+11 silly logfile done cleaning log files
+12 verbose stack Error: Missing script: "start"
+12 verbose stack
+12 verbose stack Did you mean one of these?
+12 verbose stack   npm star # Mark your favorite packages
+12 verbose stack   npm stars # View packages marked as favorites
+12 verbose stack
+12 verbose stack To see a list of scripts, run:
+12 verbose stack   npm run
+12 verbose stack     at #run (/data/data/com.termux/files/usr/lib/node_modules/npm/lib/commands/run.js:115:13)
+12 verbose stack     at async RunScript.exec (/data/data/com.termux/files/usr/lib/node_modules/npm/lib/commands/run.js:44:7)
+12 verbose stack     at async Npm.exec (/data/data/com.termux/files/usr/lib/node_modules/npm/lib/npm.js:193:9)
+12 verbose stack     at async module.exports (/data/data/com.termux/files/usr/lib/node_modules/npm/lib/cli/entry.js:67:5)
+13 error Missing script: "start"
+13 error
+13 error Did you mean one of these?
+13 error   npm star # Mark your favorite packages
+13 error   npm stars # View packages marked as favorites
+13 error
+13 error To see a list of scripts, run:
+13 error   npm run
+14 verbose cwd /data/data/com.termux/files/home
+15 verbose os Linux 4.19.198-28701120-abA135FXXSEEZB2
+16 verbose node v26.3.1
+17 verbose npm  v11.17.0
+18 verbose exit 1
+19 verbose code 1
+20 error A complete log of this run can be found in: /data/data/com.termux/files/home/.npm/_logs/2026-07-04T10_51_00_320Z-debug-0.log
