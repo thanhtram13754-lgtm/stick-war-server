@@ -25,12 +25,10 @@ function createNewPlayer(username, passwordHash) {
 }
 
 function publicPlayer(p) {
-  // Không bao giờ trả passwordHash ra ngoài
   const { passwordHash, ...safe } = p;
   return safe;
 }
 
-// POST /api/auth/register  { username, password }
 router.post('/register', async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -51,7 +49,6 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// POST /api/auth/login  { username, password }
 router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -71,7 +68,6 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// PUT /api/auth/password  { oldPassword, newPassword }  (cần token)
 router.put('/password', requireAuth, async (req, res) => {
   const { oldPassword, newPassword } = req.body || {};
   if (!oldPassword || !newPassword) return res.status(400).json({ error: 'Vui lòng điền đầy đủ thông tin.' });
@@ -91,7 +87,6 @@ router.put('/password', requireAuth, async (req, res) => {
   res.json({ success: true });
 });
 
-// DELETE /api/auth/account  (cần token) - tự xóa tài khoản của chính mình
 router.delete('/account', requireAuth, async (req, res) => {
   const deleted = db.deletePlayer(req.username);
   if (!deleted) return res.status(404).json({ error: 'Không tìm thấy tài khoản.' });
