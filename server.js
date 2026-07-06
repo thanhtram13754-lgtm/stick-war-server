@@ -9,7 +9,13 @@ if (!process.env.JWT_SECRET || !process.env.ADMIN_SECRET) {
   process.exit(1);
 }
 
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://thanhtram13754-lgtm.github.io',
+    'http://localhost:3000'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 app.get('/api/health', (req, res) => res.json({ ok: true, time: Date.now() }));
