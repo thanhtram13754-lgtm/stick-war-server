@@ -1,0 +1,25 @@
+{
+  "players": [
+    {
+      "username": "ronaldo",
+      "passwordHash": "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7b3XeKeUxWdeS86E36gBSstC",
+      "createdAt": 1625000000000,
+      "id": 123456,
+      "profile": {
+        "name": "Ronaldo",
+        "avatar": "⚔️"
+      },
+      "coins": 1000,
+      "stats": {
+        "games": 0,
+        "wins": 0,
+        "totalKills": 0,
+        "bestTime": 0,
+        "bestWave": 1,
+        "bestSpree": 0,
+        "bestDmg": 0
+      },
+      "history": []
+    }
+  ]
+}
