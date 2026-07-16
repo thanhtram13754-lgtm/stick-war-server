@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════
-// STICK WAR SERVER - Bản có Logging Dashboard bảo mật
+// STICK WAR SERVER - Bản có Log Dashboard + Player Admin Panel
 // ══════════════════════════════════════════════════════════
 
 const express = require('express');
@@ -59,11 +59,10 @@ function readLogs() {
   try { return JSON.parse(fs.readFileSync(LOGS_FILE, 'utf-8')); } catch (e) { return []; }
 }
 function writeLogs(logs) {
-  const trimmed = logs.slice(-2000); // Giữ tối đa 2000 log gần nhất
+  const trimmed = logs.slice(-2000);
   fs.writeFileSync(LOGS_FILE, JSON.stringify(trimmed, null, 2));
 }
 
-// Các field KHÔNG BAO GIỜ được log (bảo mật tuyệt đối)
 const SENSITIVE_FIELDS = ['password', 'oldpassword', 'newpassword', 'passwordhash', 'token', 'authorization'];
 function sanitize(obj) {
   if (!obj || typeof obj !== 'object') return obj;
@@ -137,7 +136,7 @@ function requireAuth(req, res, next) {
   }
 }
 
-// ── Middleware xác thực Admin (bảo vệ dashboard log) ──
+// ── Middleware xác thực Admin ──
 function requireAdmin(req, res, next) {
   const key = req.headers['x-admin-key'] || req.query.key;
   if (key !== ADMIN_KEY) {
@@ -146,7 +145,7 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// ── Middleware TỰ ĐỘNG LOG mọi request/response (đặt SAU cors/json, TRƯỚC routes) ──
+// ── Middleware TỰ ĐỘNG LOG mọi request/response ──
 app.use((req, res, next) => {
   const start = Date.now();
   const originalJson = res.json.bind(res);
@@ -174,7 +173,7 @@ app.use((req, res, next) => {
 });
 
 // ══════════════════════════════════════════════════════════
-// ROUTES
+// ROUTES - AUTH & PLAYER (chức năng gốc, không đổi)
 // ══════════════════════════════════════════════════════════
 
 app.get('/', (req, res) => res.json({ ok: true, message: 'Stick War server đang chạy.' }));
@@ -323,7 +322,7 @@ app.post('/api/player/battle-result', requireAuth, (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════
-// 📋 LOG DASHBOARD (bảo mật bằng ADMIN_KEY)
+// 📋 LOG DASHBOARD API (bảo mật bằng ADMIN_KEY)
 // ══════════════════════════════════════════════════════════
 
 app.get('/api/logs', requireAdmin, (req, res) => {
@@ -337,90 +336,304 @@ app.delete('/api/logs', requireAdmin, (req, res) => {
   res.json({ ok: true, message: 'Đã xóa toàn bộ log.' });
 });
 
-app.get('/admin/logs', (req, res) => {
-  res.send(`<!doctype html>
-<html lang="vi"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>📋 Log Dashboard - Stick War</title>
-<style>
+// ══════════════════════════════════════════════════════════
+// 👥 PLAYER ADMIN API (xem / sửa / xóa / cộng coin) — CẦN ADMIN_KEY
+// ══════════════════════════════════════════════════════════
+
+app.get('/api/admin/players', requireAdmin, (req, res) => {
+  const db = readDB();
+  const q = (req.query.search || '').toLowerCase().trim();
+  let players = db.players.map(publicPlayer);
+  if (q) players = players.filter(p => p.username.includes(q) || (p.profile?.name || '').toLowerCase().includes(q));
+  players.sort((a, b) => b.createdAt - a.createdAt);
+  res.json({ total: players.length, players });
+});
+
+app.get('/api/admin/players/:username', requireAdmin, (req, res) => {
+  const player = findPlayer(req.params.username);
+  if (!player) return res.status(404).json({ error: 'Không tìm thấy player.' });
+  res.json(publicPlayer(player));
+});
+
+app.put('/api/admin/players/:username', requireAdmin, (req, res) => {
+  const player = findPlayer(req.params.username);
+  if (!player) return res.status(404).json({ error: 'Không tìm thấy player.' });
+
+  const { coins, name, avatar, stats } = req.body || {};
+
+  if (coins !== undefined) player.coins = Math.max(0, parseInt(coins) || 0);
+  if (name !== undefined) player.profile.name = String(name).trim().slice(0, 14) || player.profile.name;
+  if (avatar !== undefined && AVATARS.includes(avatar)) player.profile.avatar = avatar;
+  if (stats && typeof stats === 'object') {
+    player.stats = {
+      games: Math.max(0, parseInt(stats.games) || 0),
+      wins: Math.max(0, parseInt(stats.wins) || 0),
+      totalKills: Math.max(0, parseInt(stats.totalKills) || 0),
+      bestTime: Math.max(0, parseInt(stats.bestTime) || 0),
+      bestWave: Math.max(1, parseInt(stats.bestWave) || 1),
+      bestSpree: Math.max(0, parseInt(stats.bestSpree) || 0),
+      bestDmg: Math.max(0, parseInt(stats.bestDmg) || 0),
+    };
+  }
+
+  savePlayer(player);
+  res.json(publicPlayer(player));
+});
+
+app.post('/api/admin/players/:username/coins', requireAdmin, (req, res) => {
+  const player = findPlayer(req.params.username);
+  if (!player) return res.status(404).json({ error: 'Không tìm thấy player.' });
+
+  const delta = parseInt(req.body?.delta) || 0;
+  player.coins = Math.max(0, (player.coins || 0) + delta);
+  savePlayer(player);
+  res.json(publicPlayer(player));
+});
+
+app.delete('/api/admin/players/:username', requireAdmin, (req, res) => {
+  const db = readDB();
+  const before = db.players.length;
+  db.players = db.players.filter(p => p.username !== req.params.username.toLowerCase());
+  if (db.players.length === before) return res.status(404).json({ error: 'Không tìm thấy player.' });
+  writeDB(db);
+  res.json({ ok: true, message: 'Đã xóa player.' });
+});
+
+// ══════════════════════════════════════════════════════════
+// 🖥️ DASHBOARD TRANG WEB
+// ══════════════════════════════════════════════════════════
+
+const DASHBOARD_STYLE = `
   *{box-sizing:border-box;}
   body{font-family:'Courier New',monospace;background:#0a0f1a;color:#c8e6ff;margin:0;padding:16px;}
-  h1{color:#ffd700;font-size:20px;margin:0 0 16px;}
+  h1{color:#ffd700;font-size:20px;margin:0 0 8px;}
+  .nav{display:flex;gap:8px;margin-bottom:16px;}
+  .nav a{color:#00d2ff;text-decoration:none;font-size:12px;padding:6px 12px;border:1px solid #00d2ff44;border-radius:6px;}
+  .nav a.active{background:#00d2ff22;}
   .bar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
   input,button{padding:10px;border-radius:8px;border:1px solid #334;background:#111827;color:#fff;font-family:inherit;}
   button{background:#00d2ff;color:#000;font-weight:bold;cursor:pointer;border:none;}
   button.danger{background:#e74c3c;color:#fff;}
+  button.gold{background:#f1c40f;color:#000;}
+  button.small{padding:6px 10px;font-size:11px;}
   #status{color:#888;font-size:12px;margin-bottom:12px;}
-  .log{background:#111827;border-left:4px solid #00d2ff;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:12px;}
-  .log.status-4,.log.status-5{border-left-color:#e74c3c;}
-  .log.status-2{border-left-color:#2ecc71;}
-  .log-top{display:flex;justify-content:space-between;color:#888;margin-bottom:6px;flex-wrap:wrap;gap:6px;}
-  .method{font-weight:bold;color:#ffd700;}
-  .path{color:#00d2ff;}
-  .status{font-weight:bold;}
-  pre{white-space:pre-wrap;word-break:break-all;background:#0d1117;padding:8px;border-radius:6px;margin:4px 0 0;font-size:11px;color:#9ad;}
-  label{display:flex;align-items:center;gap:6px;color:#888;font-size:12px;}
-</style></head>
-<body>
-  <h1>📋 STICK WAR — LOG DASHBOARD</h1>
-  <div class="bar">
-    <input type="password" id="adminKey" placeholder="Nhập Admin Key..." style="flex:1;min-width:200px;">
-    <button onclick="loadLogs()">🔍 Xem Log</button>
-    <button onclick="clearLogs()" class="danger">🗑️ Xóa Hết</button>
-    <label><input type="checkbox" id="autoRefresh"> Tự động làm mới (5s)</label>
-  </div>
-  <div id="status">Chưa tải log nào.</div>
-  <div id="logList"></div>
+`;
 
-<script>
-let refreshTimer = null;
-function getKey(){ return document.getElementById('adminKey').value.trim(); }
+app.get('/admin/logs', (req, res) => {
+  res.send('<!doctype html><html lang="vi"><head><meta charset="UTF-8">'
+    + '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+    + '<title>📋 Log Dashboard - Stick War</title>'
+    + '<style>' + DASHBOARD_STYLE + `
+      .log{background:#111827;border-left:4px solid #00d2ff;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:12px;}
+      .log.status-4,.log.status-5{border-left-color:#e74c3c;}
+      .log.status-2{border-left-color:#2ecc71;}
+      .log-top{display:flex;justify-content:space-between;color:#888;margin-bottom:6px;flex-wrap:wrap;gap:6px;}
+      .method{font-weight:bold;color:#ffd700;}
+      .path{color:#00d2ff;}
+      .status{font-weight:bold;}
+      pre{white-space:pre-wrap;word-break:break-all;background:#0d1117;padding:8px;border-radius:6px;margin:4px 0 0;font-size:11px;color:#9ad;}
+      label{display:flex;align-items:center;gap:6px;color:#888;font-size:12px;}
+    </style></head>
+    <body>
+      <h1>📋 STICK WAR — DASHBOARD</h1>
+      <div class="nav">
+        <a href="/admin/logs" class="active">📋 Logs</a>
+        <a href="/admin/players">👥 Players</a>
+      </div>
+      <div class="bar">
+        <input type="password" id="adminKey" placeholder="Nhập Admin Key..." style="flex:1;min-width:200px;">
+        <button onclick="loadLogs()">🔍 Xem Log</button>
+        <button onclick="clearLogs()" class="danger">🗑️ Xóa Hết</button>
+        <label><input type="checkbox" id="autoRefresh"> Tự động làm mới (5s)</label>
+      </div>
+      <div id="status">Chưa tải log nào.</div>
+      <div id="logList"></div>
+      <script>
+        if(localStorage.getItem('sw_admin_key')) document.getElementById('adminKey').value = localStorage.getItem('sw_admin_key');
+        let refreshTimer = null;
+        function getKey(){ const k=document.getElementById('adminKey').value.trim(); if(k) localStorage.setItem('sw_admin_key',k); return k; }
 
-async function loadLogs(){
-  const key = getKey();
-  if(!key){ alert('Vui lòng nhập Admin Key!'); return; }
-  document.getElementById('status').textContent = 'Đang tải...';
-  try{
-    const res = await fetch('/api/logs?limit=200', { headers: { 'x-admin-key': key } });
-    const data = await res.json();
-    if(!res.ok){ document.getElementById('status').textContent = '❌ ' + (data.error||'Lỗi'); return; }
-    document.getElementById('status').textContent = 'Tổng: ' + data.total + ' log · Hiện: ' + data.logs.length;
-    renderLogs(data.logs);
-  }catch(e){
-    document.getElementById('status').textContent = '❌ Không kết nối được server';
-  }
-}
+        async function loadLogs(){
+          const key = getKey();
+          if(!key){ alert('Vui lòng nhập Admin Key!'); return; }
+          document.getElementById('status').textContent = 'Đang tải...';
+          try{
+            const res = await fetch('/api/logs?limit=200', { headers: { 'x-admin-key': key } });
+            const data = await res.json();
+            if(!res.ok){ document.getElementById('status').textContent = '❌ ' + (data.error||'Lỗi'); return; }
+            document.getElementById('status').textContent = 'Tổng: ' + data.total + ' log · Hiện: ' + data.logs.length;
+            renderLogs(data.logs);
+          }catch(e){ document.getElementById('status').textContent = '❌ Không kết nối được server'; }
+        }
 
-function renderLogs(logs){
-  const el = document.getElementById('logList');
-  el.innerHTML = logs.map(l => {
-    const statusClass = 'status-' + String(l.status)[0];
-    return '<div class="log ' + statusClass + '">'
-      + '<div class="log-top">'
-      + '<span><span class="method">' + l.method + '</span> <span class="path">' + l.path + '</span></span>'
-      + '<span class="status">' + l.status + ' · ' + l.durationMs + 'ms</span>'
-      + '</div>'
-      + '<div style="color:#666;">🕐 ' + new Date(l.time).toLocaleString('vi-VN') + ' · IP: ' + (l.ip||'?') + '</div>'
-      + (l.requestBody && Object.keys(l.requestBody).length ? '<pre>📤 ' + JSON.stringify(l.requestBody) + '</pre>' : '')
-      + '</div>';
-  }).join('') || '<p style="color:#666;">Không có log nào.</p>';
-}
+        function renderLogs(logs){
+          const el = document.getElementById('logList');
+          el.innerHTML = logs.map(l => {
+            const statusClass = 'status-' + String(l.status)[0];
+            return '<div class="log ' + statusClass + '">'
+              + '<div class="log-top">'
+              + '<span><span class="method">' + l.method + '</span> <span class="path">' + l.path + '</span></span>'
+              + '<span class="status">' + l.status + ' · ' + l.durationMs + 'ms</span>'
+              + '</div>'
+              + '<div style="color:#666;">🕐 ' + new Date(l.time).toLocaleString('vi-VN') + ' · IP: ' + (l.ip||'?') + '</div>'
+              + (l.requestBody && Object.keys(l.requestBody).length ? '<pre>📤 ' + JSON.stringify(l.requestBody) + '</pre>' : '')
+              + '</div>';
+          }).join('') || '<p style="color:#666;">Không có log nào.</p>';
+        }
 
-async function clearLogs(){
-  const key = getKey();
-  if(!key){ alert('Vui lòng nhập Admin Key!'); return; }
-  if(!confirm('Xóa toàn bộ log?')) return;
-  await fetch('/api/logs', { method:'DELETE', headers:{ 'x-admin-key': key } });
-  loadLogs();
-}
+        async function clearLogs(){
+          const key = getKey();
+          if(!key){ alert('Vui lòng nhập Admin Key!'); return; }
+          if(!confirm('Xóa toàn bộ log?')) return;
+          await fetch('/api/logs', { method:'DELETE', headers:{ 'x-admin-key': key } });
+          loadLogs();
+        }
 
-document.getElementById('autoRefresh').addEventListener('change', (e)=>{
-  if(e.target.checked){ refreshTimer = setInterval(loadLogs, 5000); }
-  else { clearInterval(refreshTimer); }
+        document.getElementById('autoRefresh').addEventListener('change', (e)=>{
+          if(e.target.checked){ refreshTimer = setInterval(loadLogs, 5000); }
+          else { clearInterval(refreshTimer); }
+        });
+        document.getElementById('adminKey').addEventListener('keydown', e=>{ if(e.key==='Enter') loadLogs(); });
+        if(document.getElementById('adminKey').value) loadLogs();
+      </script>
+    </body></html>`);
 });
-document.getElementById('adminKey').addEventListener('keydown', e=>{ if(e.key==='Enter') loadLogs(); });
-</script>
-</body></html>`);
+
+app.get('/admin/players', (req, res) => {
+  res.send('<!doctype html><html lang="vi"><head><meta charset="UTF-8">'
+    + '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+    + '<title>👥 Player Admin - Stick War</title>'
+    + '<style>' + DASHBOARD_STYLE + `
+      .player{background:#111827;border-left:4px solid #c8aa6e;border-radius:8px;padding:12px 14px;margin-bottom:10px;}
+      .p-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;}
+      .p-name{font-weight:bold;color:#ffd700;font-size:14px;}
+      .p-user{color:#00d2ff;font-size:11px;}
+      .p-stats{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:#9ad;margin-bottom:8px;}
+      .p-actions{display:flex;gap:6px;flex-wrap:wrap;}
+      .edit-panel{display:none;margin-top:10px;padding-top:10px;border-top:1px dashed #334;}
+      .edit-panel.show{display:block;}
+      .edit-row{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;align-items:center;}
+      .edit-row label{min-width:80px;color:#888;font-size:11px;}
+      .edit-row input{flex:1;min-width:100px;padding:6px;font-size:12px;}
+    </style></head>
+    <body>
+      <h1>👥 STICK WAR — PLAYER ADMIN</h1>
+      <div class="nav">
+        <a href="/admin/logs">📋 Logs</a>
+        <a href="/admin/players" class="active">👥 Players</a>
+      </div>
+      <div class="bar">
+        <input type="password" id="adminKey" placeholder="Nhập Admin Key..." style="flex:1;min-width:150px;">
+        <input type="text" id="searchBox" placeholder="🔍 Tìm username..." style="flex:1;min-width:150px;">
+        <button onclick="loadPlayers()">🔍 Tải Danh Sách</button>
+      </div>
+      <div id="status">Chưa tải danh sách.</div>
+      <div id="playerList"></div>
+      <script>
+        if(localStorage.getItem('sw_admin_key')) document.getElementById('adminKey').value = localStorage.getItem('sw_admin_key');
+        function getKey(){ const k=document.getElementById('adminKey').value.trim(); if(k) localStorage.setItem('sw_admin_key',k); return k; }
+
+        async function loadPlayers(){
+          const key = getKey();
+          if(!key){ alert('Vui lòng nhập Admin Key!'); return; }
+          const q = document.getElementById('searchBox').value.trim();
+          document.getElementById('status').textContent = 'Đang tải...';
+          try{
+            const res = await fetch('/api/admin/players?search=' + encodeURIComponent(q), { headers: { 'x-admin-key': key } });
+            const data = await res.json();
+            if(!res.ok){ document.getElementById('status').textContent = '❌ ' + (data.error||'Lỗi'); return; }
+            document.getElementById('status').textContent = 'Tổng: ' + data.total + ' người chơi';
+            renderPlayers(data.players);
+          }catch(e){ document.getElementById('status').textContent = '❌ Không kết nối được server'; }
+        }
+
+        function renderPlayers(players){
+          const el = document.getElementById('playerList');
+          el.innerHTML = players.map(p => {
+            const uname = p.username;
+            return '<div class="player" id="card-' + uname + '">'
+              + '<div class="p-top">'
+              + '<div><div class="p-name">' + (p.profile && p.profile.avatar || '🧙') + ' ' + (p.profile && p.profile.name || uname) + '</div>'
+              + '<div class="p-user">@' + uname + ' · ID#' + p.id + '</div></div>'
+              + '<div style="text-align:right;color:#888;font-size:11px;">' + p.rank.icon + ' ' + p.rank.name + ' · LV.' + p.level + '</div>'
+              + '</div>'
+              + '<div class="p-stats">'
+              + '<span>💰 ' + p.coins + ' coin</span>'
+              + '<span>🎮 ' + (p.stats.games||0) + ' trận</span>'
+              + '<span>🏆 ' + (p.stats.wins||0) + ' thắng</span>'
+              + '<span>💀 ' + (p.stats.totalKills||0) + ' kill</span>'
+              + '</div>'
+              + '<div class="p-actions">'
+              + '<button class="small gold" onclick="quickCoin(\\'' + uname + '\\', 100)">+100💰</button>'
+              + '<button class="small gold" onclick="quickCoin(\\'' + uname + '\\', 1000)">+1000💰</button>'
+              + '<button class="small danger" onclick="quickCoin(\\'' + uname + '\\', -100)">-100💰</button>'
+              + '<button class="small" onclick="toggleEdit(\\'' + uname + '\\')">✏️ Sửa</button>'
+              + '<button class="small danger" onclick="deletePlayer(\\'' + uname + '\\')">🗑️ Xóa</button>'
+              + '</div>'
+              + '<div class="edit-panel" id="edit-' + uname + '">'
+              + '<div class="edit-row"><label>Tên:</label><input id="in-name-' + uname + '" value="' + (p.profile && p.profile.name || '') + '"></div>'
+              + '<div class="edit-row"><label>Coin:</label><input type="number" id="in-coins-' + uname + '" value="' + p.coins + '"></div>'
+              + '<div class="edit-row"><label>Games:</label><input type="number" id="in-games-' + uname + '" value="' + (p.stats.games||0) + '"></div>'
+              + '<div class="edit-row"><label>Wins:</label><input type="number" id="in-wins-' + uname + '" value="' + (p.stats.wins||0) + '"></div>'
+              + '<div class="edit-row"><label>Kills:</label><input type="number" id="in-kills-' + uname + '" value="' + (p.stats.totalKills||0) + '"></div>'
+              + '<button onclick="saveEdit(\\'' + uname + '\\')">💾 Lưu Thay Đổi</button>'
+              + '</div>'
+              + '</div>';
+          }).join('') || '<p style="color:#666;">Không tìm thấy player nào.</p>';
+        }
+
+        function toggleEdit(uname){
+          document.getElementById('edit-' + uname).classList.toggle('show');
+        }
+
+        async function quickCoin(uname, delta){
+          const key = getKey();
+          const res = await fetch('/api/admin/players/' + uname + '/coins', {
+            method: 'POST',
+            headers: { 'Content-Type':'application/json', 'x-admin-key': key },
+            body: JSON.stringify({ delta })
+          });
+          const data = await res.json();
+          if(!res.ok){ alert('❌ ' + (data.error||'Lỗi')); return; }
+          loadPlayers();
+        }
+
+        async function saveEdit(uname){
+          const key = getKey();
+          const body = {
+            name: document.getElementById('in-name-'+uname).value,
+            coins: parseInt(document.getElementById('in-coins-'+uname).value)||0,
+            stats: {
+              games: parseInt(document.getElementById('in-games-'+uname).value)||0,
+              wins: parseInt(document.getElementById('in-wins-'+uname).value)||0,
+              totalKills: parseInt(document.getElementById('in-kills-'+uname).value)||0,
+            }
+          };
+          const res = await fetch('/api/admin/players/' + uname, {
+            method: 'PUT',
+            headers: { 'Content-Type':'application/json', 'x-admin-key': key },
+            body: JSON.stringify(body)
+          });
+          const data = await res.json();
+          if(!res.ok){ alert('❌ ' + (data.error||'Lỗi')); return; }
+          alert('✅ Đã lưu!');
+          loadPlayers();
+        }
+
+        async function deletePlayer(uname){
+          if(!confirm('Xóa vĩnh viễn player "' + uname + '"?')) return;
+          const key = getKey();
+          const res = await fetch('/api/admin/players/' + uname, { method: 'DELETE', headers: { 'x-admin-key': key } });
+          const data = await res.json();
+          if(!res.ok){ alert('❌ ' + (data.error||'Lỗi')); return; }
+          loadPlayers();
+        }
+
+        document.getElementById('adminKey').addEventListener('keydown', e=>{ if(e.key==='Enter') loadPlayers(); });
+        document.getElementById('searchBox').addEventListener('keydown', e=>{ if(e.key==='Enter') loadPlayers(); });
+        if(document.getElementById('adminKey').value) loadPlayers();
+      </script>
+    </body></html>`);
 });
 
 // ── Bắt lỗi cuối cùng ──
@@ -432,4 +645,5 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`✅ Stick War server đang chạy tại http://localhost:${PORT}`);
   console.log(`📋 Log Dashboard: http://localhost:${PORT}/admin/logs`);
+  console.log(`👥 Player Admin: http://localhost:${PORT}/admin/players`);
 });
