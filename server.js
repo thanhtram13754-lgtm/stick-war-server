@@ -433,6 +433,19 @@ app.get('/admin/logs', (req, res) => {
       .status{font-weight:bold;}
       pre{white-space:pre-wrap;word-break:break-all;background:#0d1117;padding:8px;border-radius:6px;margin:4px 0 0;font-size:11px;color:#9ad;}
       label{display:flex;align-items:center;gap:6px;color:#888;font-size:12px;}
+
+      /* ── Tabs phân loại (6 mục) ── */
+      .cat-tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;}
+      .cat-tab{padding:8px 12px;border-radius:8px;border:1px solid #334;background:#111827;color:#889;font-size:11px;font-weight:bold;cursor:pointer;white-space:nowrap;}
+      .cat-tab.active{background:#00d2ff;color:#000;border-color:#00d2ff;}
+      .cat-tab .count{opacity:.7;font-weight:normal;}
+
+      /* ── Bộ lọc phụ ── */
+      .filter-row{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;align-items:center;}
+      .chip{padding:6px 10px;border-radius:16px;border:1px solid #334;background:#111827;color:#778;font-size:10px;font-weight:bold;cursor:pointer;}
+      .chip.active{background:#f1c40f;color:#000;border-color:#f1c40f;}
+      .chip.danger-chip.active{background:#e74c3c;color:#fff;border-color:#e74c3c;}
+      #searchPath{flex:1;min-width:140px;padding:8px;font-size:12px;}
     </style></head>
     <body>
       <h1>📋 STICK WAR — DASHBOARD</h1>
@@ -446,24 +459,86 @@ app.get('/admin/logs', (req, res) => {
         <button onclick="clearLogs()" class="danger">🗑️ Xóa Hết</button>
         <label><input type="checkbox" id="autoRefresh"> Tự động làm mới (5s)</label>
       </div>
+
+      <!-- 6 MỤC PHÂN LOẠI -->
+      <div class="cat-tabs" id="catTabs">
+        <div class="cat-tab active" data-cat="all">📦 Tất Cả <span class="count" id="c-all">0</span></div>
+        <div class="cat-tab" data-cat="auth">🔐 Xác Thực <span class="count" id="c-auth">0</span></div>
+        <div class="cat-tab" data-cat="player">🎮 Người Chơi <span class="count" id="c-player">0</span></div>
+        <div class="cat-tab" data-cat="admin">👑 Quản Trị <span class="count" id="c-admin">0</span></div>
+        <div class="cat-tab" data-cat="system">⚙️ Hệ Thống <span class="count" id="c-system">0</span></div>
+        <div class="cat-tab" data-cat="error">⚠️ Lỗi <span class="count" id="c-error">0</span></div>
+      </div>
+
+      <!-- BỘ LỌC PHỤ -->
+      <div class="filter-row">
+        <span class="chip active" data-method="ALL" onclick="setMethod('ALL',this)">TẤT CẢ</span>
+        <span class="chip" data-method="GET" onclick="setMethod('GET',this)">GET</span>
+        <span class="chip" data-method="POST" onclick="setMethod('POST',this)">POST</span>
+        <span class="chip" data-method="PUT" onclick="setMethod('PUT',this)">PUT</span>
+        <span class="chip" data-method="DELETE" onclick="setMethod('DELETE',this)">DELETE</span>
+        <span class="chip" id="hideHealthChip" onclick="toggleHideHealth(this)">🙈 Ẩn Health Check</span>
+        <span class="chip danger-chip" id="onlyErrorChip" onclick="toggleOnlyError(this)">⚠️ Chỉ Xem Lỗi</span>
+        <input type="text" id="searchPath" placeholder="🔍 Tìm theo đường dẫn (VD: register)...">
+      </div>
+
       <div id="status">Chưa tải log nào.</div>
       <div id="logList"></div>
       <script>
         if(localStorage.getItem('sw_admin_key')) document.getElementById('adminKey').value = localStorage.getItem('sw_admin_key');
         let refreshTimer = null;
+        let allLogs = [];
+        let curCat = 'all';
+        let curMethod = 'ALL';
+        let hideHealth = true;   // Mặc định ẩn health check cho gọn
+        let onlyError = false;
+
         function getKey(){ const k=document.getElementById('adminKey').value.trim(); if(k) localStorage.setItem('sw_admin_key',k); return k; }
+
+        // ── Phân loại 1 log vào 1 trong 6 mục ──
+        function categorize(l){
+          if(l.status >= 400) return 'error';
+          if(l.path.startsWith('/api/auth')) return 'auth';
+          if(l.path.startsWith('/api/player')) return 'player';
+          if(l.path.startsWith('/api/admin') || l.path.startsWith('/api/logs')) return 'admin';
+          if(l.path === '/' || l.path.startsWith('/api/health')) return 'system';
+          return 'system';
+        }
+        function isHealthNoise(l){
+          return l.path === '/' || l.path.startsWith('/api/health');
+        }
 
         async function loadLogs(){
           const key = getKey();
           if(!key){ alert('Vui lòng nhập Admin Key!'); return; }
           document.getElementById('status').textContent = 'Đang tải...';
           try{
-            const res = await fetch('/api/logs?limit=200', { headers: { 'x-admin-key': key } });
+            const res = await fetch('/api/logs?limit=300', { headers: { 'x-admin-key': key } });
             const data = await res.json();
             if(!res.ok){ document.getElementById('status').textContent = '❌ ' + (data.error||'Lỗi'); return; }
-            document.getElementById('status').textContent = 'Tổng: ' + data.total + ' log · Hiện: ' + data.logs.length;
-            renderLogs(data.logs);
+            allLogs = data.logs.map(l => ({ ...l, _cat: categorize(l) }));
+            updateCounts();
+            renderFiltered();
           }catch(e){ document.getElementById('status').textContent = '❌ Không kết nối được server'; }
+        }
+
+        function updateCounts(){
+          const counts = { all: allLogs.length, auth:0, player:0, admin:0, system:0, error:0 };
+          allLogs.forEach(l => { counts[l._cat] = (counts[l._cat]||0) + 1; });
+          Object.keys(counts).forEach(k => { const el = document.getElementById('c-'+k); if(el) el.textContent = counts[k]; });
+        }
+
+        function renderFiltered(){
+          let logs = allLogs;
+          if(curCat !== 'all') logs = logs.filter(l => l._cat === curCat);
+          if(curMethod !== 'ALL') logs = logs.filter(l => l.method === curMethod);
+          if(hideHealth) logs = logs.filter(l => !isHealthNoise(l));
+          if(onlyError) logs = logs.filter(l => l.status >= 400);
+          const q = document.getElementById('searchPath').value.toLowerCase().trim();
+          if(q) logs = logs.filter(l => l.path.toLowerCase().includes(q));
+
+          document.getElementById('status').textContent = 'Tổng: ' + allLogs.length + ' log · Đang hiện: ' + logs.length;
+          renderLogs(logs);
         }
 
         function renderLogs(logs){
@@ -478,8 +553,38 @@ app.get('/admin/logs', (req, res) => {
               + '<div style="color:#666;">🕐 ' + new Date(l.time).toLocaleString('vi-VN') + ' · IP: ' + (l.ip||'?') + '</div>'
               + (l.requestBody && Object.keys(l.requestBody).length ? '<pre>📤 ' + JSON.stringify(l.requestBody) + '</pre>' : '')
               + '</div>';
-          }).join('') || '<p style="color:#666;">Không có log nào.</p>';
+          }).join('') || '<p style="color:#666;">Không có log nào khớp bộ lọc.</p>';
         }
+
+        // ── Sự kiện: đổi tab mục ──
+        document.querySelectorAll('.cat-tab').forEach(tab => {
+          tab.addEventListener('click', () => {
+            document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            curCat = tab.dataset.cat;
+            renderFiltered();
+          });
+        });
+
+        function setMethod(m, el){
+          curMethod = m;
+          document.querySelectorAll('.chip[data-method]').forEach(c => c.classList.remove('active'));
+          el.classList.add('active');
+          renderFiltered();
+        }
+
+        function toggleHideHealth(el){
+          hideHealth = !hideHealth;
+          el.classList.toggle('active', hideHealth);
+          renderFiltered();
+        }
+        function toggleOnlyError(el){
+          onlyError = !onlyError;
+          el.classList.toggle('active', onlyError);
+          renderFiltered();
+        }
+
+        document.getElementById('searchPath').addEventListener('input', renderFiltered);
 
         async function clearLogs(){
           const key = getKey();
@@ -494,7 +599,12 @@ app.get('/admin/logs', (req, res) => {
           else { clearInterval(refreshTimer); }
         });
         document.getElementById('adminKey').addEventListener('keydown', e=>{ if(e.key==='Enter') loadLogs(); });
-        if(document.getElementById('adminKey').value) loadLogs();
+
+        // Bật sẵn nút "Ẩn Health Check" theo mặc định
+        window.addEventListener('DOMContentLoaded', () => {
+          document.getElementById('hideHealthChip').classList.add('active');
+          if(document.getElementById('adminKey').value) loadLogs();
+        });
       </script>
     </body></html>`);
 });
